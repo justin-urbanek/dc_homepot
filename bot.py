@@ -8,6 +8,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +26,18 @@ def env_id(name: str, required: bool = False) -> int:
     return int(value)
 
 
+def env_ids(name: str) -> list[int]:
+    ids = []
+    for part in os.environ.get(name, "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            sys.exit(f"{name} must be comma-separated numeric Discord IDs, got {part!r}.")
+        ids.append(int(part))
+    return ids
+
+
 TOKEN = os.environ.get("DISCORD_TOKEN", "").strip()
 if not TOKEN:
     sys.exit("DISCORD_TOKEN is missing in .env")
@@ -38,6 +51,9 @@ MEMBER_ROLE_ID = env_id("MEMBER_ROLE_ID")
 HONEYPOT_ACTION = os.environ.get("HONEYPOT_ACTION", "quarantine").lower()
 # How far back the caught user's messages get deleted
 CLEANUP_MINUTES = int(os.environ.get("CLEANUP_MINUTES") or 10)
+# Channels where all messages (except pinned ones) get deleted after AUTO_DELETE_HOURS
+AUTO_DELETE_CHANNEL_IDS = env_ids("AUTO_DELETE_CHANNEL_IDS")
+AUTO_DELETE_HOURS = float(os.environ.get("AUTO_DELETE_HOURS") or 24)
 
 DATA_FILE = Path(__file__).parent / "data" / "quarantine.json"
 GUILD = discord.Object(id=GUILD_ID)
@@ -78,6 +94,8 @@ class Bot(discord.Client):
 
     async def setup_hook(self):
         self.add_view(RulesView())  # keeps buttons from earlier posts working after a restart
+        if AUTO_DELETE_CHANNEL_IDS:
+            auto_delete.start()
         self.tree.copy_global_to(guild=GUILD)
         try:
             await self.tree.sync(guild=GUILD)
@@ -303,6 +321,34 @@ async def rules_button_cmd(
     await interaction.response.send_message("✅ Button posted.", ephemeral=True)
 
 
+# --- Auto-delete -------------------------------------------------------------
+
+@tasks.loop(minutes=10)
+async def auto_delete():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    cutoff = discord.utils.utcnow() - timedelta(hours=AUTO_DELETE_HOURS)
+    for channel_id in AUTO_DELETE_CHANNEL_IDS:
+        channel = guild.get_channel(channel_id)
+        if channel is None:
+            continue
+        try:
+            deleted = await channel.purge(
+                limit=None, before=cutoff, check=lambda m: not m.pinned, reason="Auto-delete"
+            )
+        except discord.HTTPException as e:
+            print(f"WARNING: auto-delete in #{channel.name} failed: {e}")
+            continue
+        if deleted:
+            print(f"Auto-delete: removed {len(deleted)} message(s) from #{channel.name}")
+
+
+@auto_delete.before_loop
+async def before_auto_delete():
+    await bot.wait_until_ready()
+
+
 # --- Events ------------------------------------------------------------------
 
 @bot.event
@@ -332,6 +378,11 @@ async def on_ready():
 
     check_channel("Honeypot", HONEYPOT_CHANNEL_ID, ["view_channel", "read_message_history", "manage_messages"])
     check_channel("Log channel", LOG_CHANNEL_ID, ["view_channel", "send_messages"])
+    for channel_id in AUTO_DELETE_CHANNEL_IDS:
+        check_channel(
+            f"Auto-delete ({AUTO_DELETE_HOURS:g}h)", channel_id,
+            ["view_channel", "read_message_history", "manage_messages"],
+        )
     if MEMBER_ROLE_ID:
         member_role = guild.get_role(MEMBER_ROLE_ID)
         if member_role is None:

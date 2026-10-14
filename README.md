@@ -119,3 +119,4 @@ Diese Befehle sehen nur Leute mit dem Recht *Mitglieder timeouten*. Anpassen kan
 - Leaven und neu joinen hebt die Quarantäne nicht auf.
 - Ein **Admin mit Administrator-Recht** könnte den Bot kicken, bevor du reagierst. Gegen einen Admin, der wirklich durchdreht, hilft nur: so wenige Leute wie möglich mit Administrator-Recht.
 - `HONEYPOT_ACTION=quarantine` (Standard) ist freundlich zu gehackten Accounts von echten Freunden: Du prüfst und gibst sie wieder frei. Bei sehr viel Bot-Spam stellst du auf `softban` oder `ban` um.
+- **Auto-Löschen:** Alle Kanäle in `AUTO_DELETE_CHANNEL_IDS` räumt der Bot alle 10 Minuten auf. Gelöscht wird alles, was älter als `AUTO_DELETE_HOURS` ist (Standard: 24 Stunden). **Angepinnte Nachrichten bleiben stehen.** Der Bot braucht dort *Kanal ansehen*, *Nachrichtenverlauf lesen* und *Nachrichten verwalten*.
