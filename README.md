@@ -96,16 +96,14 @@ IDs kopieren: Discord → Einstellungen → Erweitert → **Entwicklermodus** an
 Der Bot läuft auf homelab-server aus einem Image der Gitea-Registry. Ausgerollt wird **von Hand**, eine neue Version läuft erst, wenn du sie einträgst.
 
 - **Images:** Jeder Push auf `main` baut `git.jubrlab.ch/jubr/dc_homepot:main` (und `:<commit>`), siehe `.gitea/workflows/ci.yaml`. Fürs Homelab gedacht sind die **Releases**: ein Tag `v1.2.0` (Terminal oder Browser → Releases → Neues Release) baut nach dem Check `:1.2.0`, `:1.2`, `:latest` und legt das Release an (`release.yaml`).
-- **Stack:** `dc_homepot/compose.yaml` im Homelab-Repo, dort steht die laufende Version fest drin. Neue Version ausrollen:
+- **Stack:** `dc_homepot/compose.yaml` im Homelab-Repo, mit `:latest` (= neuestes Release). Nach einem neuen Release ausrollen:
 
   ```bash
-  # im Homelab-Repo: image: git.jubrlab.ch/jubr/dc_homepot:<neue Version> eintragen, committen
   ssh jubr@192.168.1.104
-  cd ~/homelab && git pull
-  cd dc_homepot && docker compose pull && docker compose up -d
+  cd ~/homelab/dc_homepot && docker compose pull && docker compose up -d
   ```
 
-  Zurück auf eine alte Version: alte Nummer eintragen, dieselben Befehle.
+  Zurück auf eine alte Version: dort statt `latest` die Nummer eintragen (z.B. `:1.1.0`), dieselben Befehle.
 - **Konfiguration:** `~/homelab/dc_homepot/.env` auf dem Server (wie `.env.example`, nicht in git, im Backup). Nach einer Änderung `docker compose up -d`.
 - **Daten:** `quarantine.json` liegt auf dem Server in `~/homelab/dc_homepot/data` und ist im nächtlichen Backup.
 - **Logs:** `ssh jubr@192.168.1.104 'docker logs --tail 50 dc_homepot'`
