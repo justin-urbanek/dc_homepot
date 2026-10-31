@@ -1,0 +1,94 @@
+# Release on every new version tag (v1.2.0, v1.3.0-rc.1, ...). Two ways to
+# make one, both end up in this same single run:
+#   - terminal: git tag v1.2.0 && git push origin v1.2.0
+#   - browser:  Releases -> New release, new tag v1.2.0 (Gitea creates the tag,
+#               which fires this push event)
+# Deliberately only `push: tags` and no `release:` trigger: a release made in
+# the browser fires both, which would build everything twice.
+#
+#   test     same check as ci.yaml
+#   image    :<version> :<major.minor> :latest :<sha>; pre-releases (a "-" in
+#            the tag) get only :<version> :<sha>
+#   release  creates the Gitea release if it doesn't exist yet, otherwise keeps
+#            the existing one (and its notes) and appends the commit list
+#
+# Needs the user-level secret REGISTRY_TOKEN (package + repository: Read and write).
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the tag is a version (v1.2.0, v1.3.0-rc.1)
+        run: |
+          if [[ ! $GITHUB_REF_NAME =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$GITHUB_REF_NAME' is not a version tag like v1.2.0 or v1.3.0-rc.1 - delete the tag (and its release) and create a correct one"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - run: python3 -m py_compile bot.py
+
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: git.jubrlab.ch/jubr/dc_homepot
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login git.jubrlab.ch -u "${{ gitea.actor }}" --password-stdin
+      - run: |
+          version=${GITHUB_REF_NAME#v}
+          tags=("$version" "${GITHUB_SHA::7}")
+          if [[ $version != *-* ]]; then
+            tags+=("$(cut -d. -f1-2 <<< "$version")" latest)
+          fi
+          docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE:$version" .
+          for t in "${tags[@]}"; do
+            docker tag "$IMAGE:$version" "$IMAGE:$t"
+            docker push "$IMAGE:$t"
+          done
+      - if: always()
+        run: docker logout git.jubrlab.ch
+
+  release:
+    needs: image
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      API: ${{ gitea.server_url }}/api/v1/repos/${{ gitea.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          tag=$GITHUB_REF_NAME
+          git fetch --tags --force -q
+          # a stable release lists everything since the previous stable one,
+          # not just since its own release candidate
+          skip=(); [[ $tag != *-* ]] && skip=(--exclude 'v*-*')
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${skip[@]}" "$tag^" 2>/dev/null || true)
+          commits=$(git log --pretty='- %s (%h)' ${prev:+"$prev.."}"$tag")
+          section="## Commits${prev:+ seit $prev}"$'\n\n'"$commits"
+          api() { curl -sf -H "Authorization: token $TOKEN" -H "Content-Type: application/json" "$@"; }
+
+          if existing=$(api "$API/releases/tags/$tag"); then
+            body=$(jq -r '.body // ""' <<< "$existing")
+            if grep -q '^## Commits' <<< "$body"; then
+              echo "Release $tag already has a commit list, nothing to do"
+              exit 0
+            fi
+            id=$(jq -r .id <<< "$existing")
+            jq -n --arg b "$body" --arg s "$section" '{body: ([$b, $s] | map(select(. != "")) | join("\n\n"))}' \
+              | api -X PATCH "$API/releases/$id" -d @- > /dev/null
+            echo "Release $tag existed (made in the browser), commit list appended"
+          else
+            pre=false; [[ $tag == *-* ]] && pre=true
+            jq -n --arg t "$tag" --arg b "$section" --argjson p "$pre" \
+              '{tag_name: $t, name: $t, body: $b, prerelease: $p}' \
+              | api -X POST "$API/releases" -d @- > /dev/null
+            echo "Release $tag created"
+          fi
