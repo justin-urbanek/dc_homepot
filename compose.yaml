@@ -1,0 +1,27 @@
+# How the bot runs on homelab-server. Started by the deploy job in
+# .gitea/workflows/ci.yaml, which runs on the server's Gitea runner and so
+# talks to the server's Docker directly - no manual deploy needed.
+#
+# bot.env is written by that job from the repo secret BOT_ENV (the contents of
+# .env, see .env.example); it never ends up in git or in the image.
+# The quarantine state lives on the server in ~/homelab/dc_homepot/data,
+# which the nightly server backup includes.
+services:
+  bot:
+    image: dc_homepot:main
+    container_name: dc_homepot
+    restart: unless-stopped
+    env_file: bot.env
+    environment:
+      TZ: Europe/Zurich
+    volumes:
+      - /home/jubr/homelab/dc_homepot/data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M

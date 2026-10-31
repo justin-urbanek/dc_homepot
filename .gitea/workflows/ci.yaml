@@ -1,0 +1,54 @@
+# check:  on every push and PR - bot.py must at least compile.
+# deploy: on main (and "Run workflow" by hand) - builds the image on
+#         homelab-server and (re)starts the bot there with compose.yaml.
+#         Runs on the server runner, whose jobs use the server's Docker.
+# Needs the repo secret BOT_ENV: the full contents of .env (see .env.example).
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m py_compile bot.py
+
+  deploy:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write bot.env from the BOT_ENV secret
+        env:
+          BOT_ENV: ${{ secrets.BOT_ENV }}
+        run: |
+          if [ -z "$BOT_ENV" ]; then
+            echo "::error::Secret BOT_ENV fehlt: Repo -> Einstellungen -> Actions -> Secrets, Inhalt der .env einfügen"
+            exit 1
+          fi
+          printf '%s\n' "$BOT_ENV" > bot.env
+          grep -q '^DISCORD_TOKEN=..*' bot.env || { echo "::error::BOT_ENV enthält kein DISCORD_TOKEN"; exit 1; }
+
+      - name: Build image
+        run: docker build --label "org.opencontainers.image.revision=$GITHUB_SHA" -t dc_homepot:main .
+
+      - name: Start / update the bot
+        run: docker compose -p dc_homepot up -d --no-build
+
+      - name: Check that it keeps running
+        run: |
+          sleep 20
+          state=$(docker inspect -f '{{.State.Status}} restarts={{.RestartCount}}' dc_homepot)
+          echo "dc_homepot: $state"
+          docker logs --tail 20 dc_homepot 2>&1
+          [ "$state" = "running restarts=0" ]
+
+      - name: Remove bot.env
+        if: always()
+        run: rm -f bot.env

@@ -91,6 +91,17 @@ IDs kopieren: Discord → Einstellungen → Erweitert → **Entwicklermodus** an
 
 ## 4. Bot starten
 
+### Auf dem Homelab (automatisch)
+
+Der Bot läuft auf homelab-server. Jeder Push auf `main` baut ihn neu und startet ihn neu (`.gitea/workflows/ci.yaml`, `compose.yaml`). Den Stand siehst du unter **Actions**.
+
+- **Konfiguration:** Repo → Einstellungen → Actions → Secrets → **`BOT_ENV`**, Inhalt: die komplette `.env`. Nach einer Änderung unter Actions → ci → „Workflow ausführen“ neu ausrollen.
+- **Daten:** `quarantine.json` liegt auf dem Server in `~/homelab/dc_homepot/data` und ist im nächtlichen Backup.
+- **Logs:** `ssh jubr@192.168.1.104 'docker logs --tail 50 dc_homepot'`
+- Der Bot darf mit demselben Token **nur einmal** laufen. Läuft er noch woanders, dort stoppen.
+
+### Lokal (zum Entwickeln)
+
 ```bash
 cp .env.example .env        # dann .env ausfüllen
 python3 -m venv .venv
